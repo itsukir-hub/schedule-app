@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>スケジュール管理アプリ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1 id="today"></h1>
+  </header>
+
+  <section id="overdue-section">
+    <h2>終わらなかった予定</h2>
+    <ul id="overdue-list"></ul>
+  </section>
+
+  <section class="summary">
+    <p id="remaining"></p>
+    <p id="planned"></p>
+    <p id="margin"></p>
+  </section>
+
+  <section>
+    <h2>今日やること</h2>
+    <ul id="task-list"></ul>
+  </section>
+
+  <section>
+    <h2>予定を追加</h2>
+    <form id="add-form">
+      <input type="text" id="task-name" list="history" placeholder="英語リスニング" required>
+      <datalist id="history"></datalist>
+      <select id="task-minutes">
+        <option value="15">15分</option>
+        <option value="30" selected>30分</option>
+        <option value="60">60分</option>
+        <option value="90">90分</option>
+      </select>
+      <select id="task-day">
+        <option value="0">今日</option>
+        <option value="1">明日</option>
+      </select>
+      <button type="submit">追加</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>明日の予定</h2>
+    <ul id="tomorrow-list"></ul>
+  </section>
+
+  <button id="week-button">今週</button>
+
+  <script>
+    // 分を「○時間○分」に変換する道具
+    function formatMinutes(total) {
+      const h = Math.floor(total / 60);
+      const m = total % 60;
+      return `${h}時間${m}分`;
+    }
+
+    // アプリ上の「日付」を出す道具(朝5時までは前の日扱い)
+    function getAppDay(offset) {
+      const d = new Date();
+      if (d.getHours() < 5) {
+        d.setDate(d.getDate() - 1);
+      }
+      d.setDate(d.getDate() + offset);
+      return d;
+    }
+
+    // 日付を「2026-10-04」の形の文字にする道具
+    function toKey(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+
+    // ★タイムトラベル用：試す時は 0→2、1→3 に変える。終わったら必ず戻す
+    const todayDate = getAppDay(0);
+    const todayKey = toKey(todayDate);
+    const tomorrowKey = toKey(getAppDay(1));
+
+    // 今日の日付を表示
+    const days = ["日", "月", "火", "水", "木", "金", "土"];
+    document.getElementById("today").textContent =
+      `${todayDate.getMonth() + 1}月${todayDate.getDate()}日(${days[todayDate.getDay()]})`;
+
+    // 残り時間(就寝時間：1時)
+    const now = new Date();
+    const bedtime = new Date();
+    bedtime.setHours(25, 0, 0, 0);
+    if (now.getHours() < 5) {
+      bedtime.setDate(bedtime.getDate() - 1);
+    }
+    const remainingMinutes = Math.floor((bedtime - now) / 1000 / 60);
+
+    if (remainingMinutes <= 0) {
+      document.getElementById("remaining").textContent = "就寝時間を過ぎています";
+    } else {
+      document.getElementById("remaining").textContent = `残り時間：${formatMinutes(remainingMinutes)}`;
+    }
+
+    // データを保存する道具
+    function saveTasks() {
+      localStorage.setItem("tasks", JSON.stringify(tasks));
+    }
+
+    // 保存したデータを読み込む道具
+    function loadTasks() {
+      const saved = localStorage.getItem("tasks");
+      if (saved) {
+        const loaded = JSON.parse(saved);
+        // 日付がない古いデータは「今日」の予定として扱う
+        for (const task of loaded) {
+          if (!task.date) {
+            task.date = todayKey;
+          }
+        }
+        return loaded;
+      }
+      // 保存データがない時(初回)の予定
+      return [
+        { name: "英語リスニング", minutes: 30, done: false, date: todayKey },
+        { name: "筋トレ 胸", minutes: 60, done: false, date: todayKey },
+        { name: "資格勉強", minutes: 60, done: false, date: todayKey },
+      ];
+    }
+
+    // 予定のデータ
+    const tasks = loadTasks();
+    saveTasks();
+
+    // この画面を開いている間にチェックした予定の一時メモ(保存しない)
+    const checkedNow = new Set();
+
+    const overdueSection = document.getElementById("overdue-section");
+    const overdueList = document.getElementById("overdue-list");
+    const list = document.getElementById("task-list");
+    const tomorrowList = document.getElementById("tomorrow-list");
+    const historyList = document.getElementById("history");
+    const nameInput = document.getElementById("task-name");
+    const minutesSelect = document.getElementById("task-minutes");
+    const daySelect = document.getElementById("task-day");
+    const marginText = document.getElementById("margin");
+
+    // ボタンを作る道具
+    function makeButton(label, onClick) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", onClick);
+      return button;
+    }
+
+    // 過去の予定の一覧(予定名 → 最後に使った時間)を作る道具
+    function getHistory() {
+      const history = new Map();
+      for (const task of tasks) {
+        history.set(task.name, task.minutes);
+      }
+      return history;
+    }
+
+    // 入力候補を描き直す道具
+    function renderHistory() {
+      historyList.replaceChildren();
+      for (const name of getHistory().keys()) {
+        const option = document.createElement("option");
+        option.value = name;
+        historyList.appendChild(option);
+      }
+    }
+
+    // 終わらなかった予定を処理する道具
+    function handleOverdue(task, reasonInput, action) {
+      const reason = reasonInput.value.trim();
+      if (reason !== "") {
+        task.reason = reason;
+      }
+      task.postponed = (task.postponed || 0) + 1;
+
+      if (action === "today") {
+        task.date = todayKey;
+      } else if (action === "tomorrow") {
+        task.date = tomorrowKey;
+      } else if (action === "drop") {
+        task.dropped = true;
+      }
+
+      saveTasks();
+      render();
+    }
+
+    // 画面を描き直す道具
+    function render() {
+      // 終わらなかった予定(日付が過ぎて、未完了で、やめていないもの)
+      const overdue = tasks.filter(
+        (task) => task.date < todayKey && !task.done && !task.dropped
+      );
+      overdueSection.hidden = overdue.length === 0;
+      overdueList.replaceChildren();
+
+      for (const task of overdue) {
+        const li = document.createElement("li");
+        li.append(`${task.name} ${task.minutes}分(${task.date})`);
+
+        const reasonInput = document.createElement("input");
+        reasonInput.type = "text";
+        reasonInput.placeholder = "できなかった理由(任意)";
+
+        li.appendChild(reasonInput);
+        li.appendChild(makeButton("今日やる", () => handleOverdue(task, reasonInput, "today")));
+        li.appendChild(makeButton("明日に回す", () => handleOverdue(task, reasonInput, "tomorrow")));
+        li.appendChild(makeButton("やめる", () => handleOverdue(task, reasonInput, "drop")));
+
+        overdueList.appendChild(li);
+      }
+
+      // 今日の予定
+      list.replaceChildren();
+      for (const task of tasks) {
+        if (task.date !== todayKey) {
+          continue;
+        }
+        if (task.done && !checkedNow.has(task)) {
+          continue;
+        }
+
+        const li = document.createElement("li");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = task.done;
+
+        checkbox.addEventListener("change", () => {
+          task.done = checkbox.checked;
+          checkedNow.add(task);
+          saveTasks();
+          render();
+        });
+
+        li.appendChild(checkbox);
+        li.append(`${task.name} ${task.minutes}分`);
+
+        // 完了した予定には「done」の名札を付ける(見た目はCSSで指定)
+        if (task.done) {
+          li.classList.add("done");
+        }
+
+        list.appendChild(li);
+      }
+
+      // 明日の予定
+      tomorrowList.replaceChildren();
+      for (const task of tasks) {
+        if (task.date === tomorrowKey) {
+          const li = document.createElement("li");
+          li.textContent = `${task.name} ${task.minutes}分`;
+          tomorrowList.appendChild(li);
+        }
+      }
+
+      // 今日の未完了の予定の合計時間
+      let plannedMinutes = 0;
+      for (const task of tasks) {
+        if (task.date === todayKey && !task.done) {
+          plannedMinutes += task.minutes;
+        }
+      }
+      document.getElementById("planned").textContent = `残りの予定：${formatMinutes(plannedMinutes)}`;
+
+      // 余裕かオーバーか(色はCSSの ok / over で指定)
+      const available = Math.max(remainingMinutes, 0);
+      const margin = available - plannedMinutes;
+      if (margin >= 0) {
+        marginText.textContent = `余裕：${formatMinutes(margin)}`;
+        marginText.className = "ok";
+      } else {
+        marginText.textContent = `オーバー：${formatMinutes(-margin)}`;
+        marginText.className = "over";
+      }
+
+      renderHistory();
+    }
+
+    // 候補を選んだ時に、前回の時間を自動で選ぶ
+    nameInput.addEventListener("input", () => {
+      const history = getHistory();
+      const name = nameInput.value.trim();
+      if (history.has(name)) {
+        minutesSelect.value = String(history.get(name));
+      }
+    });
+
+    // 予定を追加する時の動き
+    const form = document.getElementById("add-form");
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      const name = nameInput.value.trim();
+      const minutes = Number(minutesSelect.value);
+      const date = daySelect.value === "1" ? tomorrowKey : todayKey;
+
+      if (name === "") {
+        return;
+      }
+
+      tasks.push({ name: name, minutes: minutes, done: false, date: date });
+      saveTasks();
+      render();
+      form.reset();
+    });
+
+    // 最初に1回描く
+    render();
+  </script>
+</body>
+</html> 
