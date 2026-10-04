@@ -15,6 +15,7 @@
   --grid: rgba(0, 255, 136, 0.05);
   --ok: #3de8ff;
   --over: #ff4d6d;
+  --routine: #b78cff;
   --glow: 0 0 8px rgba(0, 255, 136, 0.6);
   --font-display: "Exo 2", "Noto Sans JP", sans-serif;
   --radius-card: 20px;
@@ -262,6 +263,7 @@ form {
 }
 
 input[type="text"],
+input[type="time"],
 select {
   font-size: 16px;
   padding: 10px 12px;
@@ -273,6 +275,7 @@ select {
 }
 
 input[type="text"]:focus,
+input[type="time"]:focus,
 select:focus {
   border-color: var(--accent);
   box-shadow: var(--glow);
@@ -288,7 +291,8 @@ select option {
   color: var(--text);
 }
 
-#task-name {
+#task-name,
+#routine-name {
   flex: 1 1 100%;
   width: 100%;
   min-width: 0;
@@ -352,6 +356,119 @@ form button {
   flex: 1;
   padding: 10px 6px;
   font-size: 14px;
+}
+
+/* ルーティンの目印 */
+.tag {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--sub);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* ルーティンの色(紫) */
+li.routine {
+  color: var(--routine);
+}
+
+li.routine .tag {
+  color: var(--routine);
+  border-color: var(--routine);
+}
+
+li.routine input[type="checkbox"] {
+  border-color: var(--routine);
+}
+
+li.routine input[type="checkbox"]::before {
+  background: var(--routine);
+  box-shadow: 0 0 8px rgba(183, 140, 255, 0.6);
+}
+
+#timeline-list li.routine .time {
+  color: var(--routine);
+}
+
+#timeline-list li.routine .cal-link {
+  border-color: var(--routine);
+  background: rgba(183, 140, 255, 0.12);
+}
+
+/* 今夜のタイムライン */
+.timeline-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.timeline-controls label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--sub);
+}
+
+.timeline-controls input,
+.timeline-controls select {
+  flex: 1;
+  min-width: 0;
+}
+
+#timeline-list .time {
+  flex-shrink: 0;
+  min-width: 104px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+#timeline-list .task-name {
+  flex: 1;
+  min-width: 0;
+}
+
+#timeline-list li.late .time {
+  color: var(--over);
+}
+
+.warn {
+  display: block;
+  font-size: 11px;
+  color: var(--over);
+}
+
+.cal-link {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 14px;
+  text-decoration: none;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+
+/* ルーティン設定 */
+#routine-list li button {
+  margin-left: auto;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+#routine-form {
+  margin-top: 10px;
+}
+
+.note {
+  font-size: 12px;
+  color: var(--sub);
+  margin: 10px 0 0;
 }
 
 /* 振り返り */

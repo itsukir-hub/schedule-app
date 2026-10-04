@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <header>
@@ -32,6 +32,21 @@
   <section>
     <h2>今日やること</h2>
     <ul id="task-list"></ul>
+  </section>
+
+  <section>
+    <h2>今夜のタイムライン</h2>
+    <div class="timeline-controls">
+      <label>開始 <input type="time" id="timeline-start"></label>
+      <label>休憩
+        <select id="timeline-break">
+          <option value="0">なし</option>
+          <option value="5">5分</option>
+          <option value="10">10分</option>
+        </select>
+      </label>
+    </div>
+    <ul id="timeline-list"></ul>
   </section>
 
   <section>
@@ -63,6 +78,24 @@
     <button type="button" id="review-button">振り返り用にコピー</button>
     <p id="review-status"></p>
     <textarea id="review-text" readonly hidden></textarea>
+  </section>
+
+  <section>
+    <h2>ルーティン(毎日自動で追加)</h2>
+    <ul id="routine-list"></ul>
+    <form id="routine-form">
+      <input type="text" id="routine-name" placeholder="ご飯" required>
+      <select id="routine-minutes">
+        <option value="10">10分</option>
+        <option value="15">15分</option>
+        <option value="20">20分</option>
+        <option value="30" selected>30分</option>
+        <option value="45">45分</option>
+        <option value="60">60分</option>
+      </select>
+      <button type="submit">ルーティンを追加</button>
+    </form>
+    <p class="note">追加・削除は、明日の分から反映されます</p>
   </section>
 
   <button id="week-button">今週</button>
@@ -148,6 +181,43 @@
     const tasks = loadTasks();
     saveTasks();
 
+    // ルーティンを保存する道具
+    function saveRoutines() {
+      localStorage.setItem("routines", JSON.stringify(routines));
+    }
+
+    // ルーティンを読み込む道具
+    function loadRoutines() {
+      const saved = localStorage.getItem("routines");
+      if (saved) {
+        return JSON.parse(saved);
+      }
+      // 初回のルーティン
+      return [
+        { name: "ご飯", minutes: 30 },
+        { name: "シャワー", minutes: 20 },
+        { name: "家事", minutes: 30 },
+      ];
+    }
+
+    const routines = loadRoutines();
+    saveRoutines();
+
+    // 今日のルーティンを「今日やること」に追加(1日1回だけ)
+    if (localStorage.getItem("routineDate") !== todayKey) {
+      for (const routine of routines) {
+        tasks.push({
+          name: routine.name,
+          minutes: routine.minutes,
+          done: false,
+          date: todayKey,
+          routine: true,
+        });
+      }
+      localStorage.setItem("routineDate", todayKey);
+      saveTasks();
+    }
+
     // この画面を開いている間にチェックした予定の一時メモ(保存しない)
     const checkedNow = new Set();
 
@@ -174,6 +244,10 @@
     function getHistory() {
       const history = new Map();
       for (const task of tasks) {
+        // ルーティンは候補に出さない
+        if (task.routine) {
+          continue;
+        }
         history.set(task.name, task.minutes);
       }
       return history;
@@ -213,7 +287,7 @@
     function render() {
       // 終わらなかった予定(日付が過ぎて、未完了で、やめていないもの)
       const overdue = tasks.filter(
-        (task) => task.date < todayKey && !task.done && !task.dropped
+        (task) => task.date < todayKey && !task.done && !task.dropped && !task.routine
       );
       overdueSection.hidden = overdue.length === 0;
       overdueList.replaceChildren();
@@ -258,6 +332,15 @@
 
         li.appendChild(checkbox);
         li.append(`${task.name} ${task.minutes}分`);
+
+        // ルーティンには小さな目印と色を付ける
+        if (task.routine) {
+          li.classList.add("routine");
+          const tag = document.createElement("span");
+          tag.className = "tag";
+          tag.textContent = "ルーティン";
+          li.appendChild(tag);
+        }
 
         // 完了した予定には「done」の名札を付ける(見た目はCSSで指定)
         if (task.done) {
@@ -312,7 +395,170 @@
         `予定 ${formatMinutes(plannedMinutes)} / 使える時間 ${formatMinutes(available)}(${percent}%)`;
 
       renderHistory();
+      renderTimeline();
     }
+
+    // ===== 今夜のタイムライン =====
+    const startInput = document.getElementById("timeline-start");
+    const breakSelect = document.getElementById("timeline-break");
+    const timelineList = document.getElementById("timeline-list");
+
+    // 数字を2桁にそろえる道具
+    function pad(n) {
+      return String(n).padStart(2, "0");
+    }
+
+    // 日時を「22:30」の形にする道具
+    function toHHMM(d) {
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    // 日時を Googleカレンダー用の「20261004T223000」の形にする道具
+    function toCalendarStamp(d) {
+      return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+    }
+
+    // Googleカレンダーの予定作成画面のURLを作る道具
+    function calendarUrl(name, start, end) {
+      const params = new URLSearchParams({
+        action: "TEMPLATE",
+        text: name,
+        dates: `${toCalendarStamp(start)}/${toCalendarStamp(end)}`,
+        details: "スケジュール管理アプリから登録",
+        ctz: "Asia/Tokyo",
+      });
+      return `https://calendar.google.com/calendar/render?${params.toString()}`;
+    }
+
+    // 開始時刻の初期値(今の時刻を15分単位で切り上げ)
+    function defaultStartValue() {
+      const d = new Date();
+      const total = Math.ceil((d.getHours() * 60 + d.getMinutes()) / 15) * 15;
+      return `${pad(Math.floor(total / 60) % 24)}:${pad(total % 60)}`;
+    }
+
+    // 今日選んだ開始時刻があればそれを使う
+    const savedStart = JSON.parse(localStorage.getItem("timelineStart") || "null");
+    if (savedStart && savedStart.date === todayKey) {
+      startInput.value = savedStart.time;
+    } else {
+      startInput.value = defaultStartValue();
+    }
+
+    // タイムラインを描き直す道具
+    function renderTimeline() {
+      timelineList.replaceChildren();
+
+      // 今日の未完了の予定(ルーティンを先頭に)
+      const items = tasks
+        .filter((task) => task.date === todayKey && !task.done)
+        .sort((a, b) => (b.routine ? 1 : 0) - (a.routine ? 1 : 0));
+
+      if (items.length === 0) {
+        const li = document.createElement("li");
+        li.textContent = "今日の予定はすべて完了しています";
+        timelineList.appendChild(li);
+        return;
+      }
+
+      if (!startInput.value) {
+        return;
+      }
+
+      // 開始時刻を日時にする(夕方以降に開いて0〜4時台を選んだら、翌日の深夜として扱う)
+      const [startHour, startMinute] = startInput.value.split(":").map(Number);
+      const cursor = new Date();
+      cursor.setHours(startHour, startMinute, 0, 0);
+      if (now.getHours() >= 5 && startHour < 5) {
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      const breakMinutes = Number(breakSelect.value);
+
+      for (const task of items) {
+        const start = new Date(cursor);
+        const end = new Date(cursor.getTime() + task.minutes * 60 * 1000);
+
+        const li = document.createElement("li");
+        if (task.routine) {
+          li.classList.add("routine");
+        }
+
+        const time = document.createElement("span");
+        time.className = "time";
+        time.textContent = `${toHHMM(start)}〜${toHHMM(end)}`;
+
+        const name = document.createElement("span");
+        name.className = "task-name";
+        name.textContent = task.name;
+
+        // 就寝時間を超える予定には警告
+        if (end > bedtime) {
+          li.classList.add("late");
+          const warn = document.createElement("span");
+          warn.className = "warn";
+          warn.textContent = "就寝時間を超えます";
+          name.appendChild(warn);
+        }
+
+        const link = document.createElement("a");
+        link.className = "cal-link";
+        link.href = calendarUrl(task.name, start, end);
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = "📅";
+
+        li.appendChild(time);
+        li.appendChild(name);
+        li.appendChild(link);
+        timelineList.appendChild(li);
+
+        // 次の予定の開始 = この予定の終わり + 休憩
+        cursor.setTime(end.getTime() + breakMinutes * 60 * 1000);
+      }
+    }
+
+    // 開始時刻や休憩を変えたら、描き直す
+    startInput.addEventListener("change", () => {
+      localStorage.setItem("timelineStart", JSON.stringify({ date: todayKey, time: startInput.value }));
+      renderTimeline();
+    });
+    breakSelect.addEventListener("change", renderTimeline);
+
+    // ===== ルーティン設定 =====
+    const routineList = document.getElementById("routine-list");
+    const routineForm = document.getElementById("routine-form");
+    const routineName = document.getElementById("routine-name");
+    const routineMinutes = document.getElementById("routine-minutes");
+
+    // ルーティン一覧を描き直す道具
+    function renderRoutines() {
+      routineList.replaceChildren();
+      routines.forEach((routine, index) => {
+        const li = document.createElement("li");
+        li.append(`${routine.name} ${routine.minutes}分`);
+        li.appendChild(makeButton("削除", () => {
+          routines.splice(index, 1);
+          saveRoutines();
+          renderRoutines();
+        }));
+        routineList.appendChild(li);
+      });
+    }
+
+    routineForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const name = routineName.value.trim();
+      if (name === "") {
+        return;
+      }
+      routines.push({ name: name, minutes: Number(routineMinutes.value) });
+      saveRoutines();
+      renderRoutines();
+      routineForm.reset();
+    });
+
+    renderRoutines();
 
     // 候補を選んだ時に、前回の時間を自動で選ぶ
     nameInput.addEventListener("input", () => {
@@ -395,6 +641,9 @@
       for (const task of weekTasks) {
         let line = `- ${shortDate(task.date)} ${task.name} ${task.minutes}分:${statusText(task)}`;
         const notes = [];
+        if (task.routine) {
+          notes.push("ルーティン");
+        }
         if (task.postponed) {
           notes.push(`先送り${task.postponed}回`);
         }
