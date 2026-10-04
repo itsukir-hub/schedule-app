@@ -23,6 +23,10 @@
     <p id="remaining"></p>
     <p id="planned"></p>
     <p id="margin"></p>
+    <div class="time-bar">
+      <div id="time-bar-fill"></div>
+    </div>
+    <p id="time-bar-label"></p>
   </section>
 
   <section>
@@ -52,6 +56,13 @@
   <section>
     <h2>明日の予定</h2>
     <ul id="tomorrow-list"></ul>
+  </section>
+
+  <section>
+    <h2>振り返り</h2>
+    <button type="button" id="review-button">振り返り用にコピー</button>
+    <p id="review-status"></p>
+    <textarea id="review-text" readonly hidden></textarea>
   </section>
 
   <button id="week-button">今週</button>
@@ -286,6 +297,20 @@
         marginText.className = "over";
       }
 
+      // 残り時間バー(使える時間のうち、予定がどれくらいを占めるか)
+      let ratio = 0;
+      if (available > 0) {
+        ratio = plannedMinutes / available;
+      } else if (plannedMinutes > 0) {
+        ratio = 1;
+      }
+      const percent = Math.round(ratio * 100);
+      const barFill = document.getElementById("time-bar-fill");
+      barFill.style.width = `${Math.min(percent, 100)}%`;
+      barFill.className = margin >= 0 ? "ok" : "over";
+      document.getElementById("time-bar-label").textContent =
+        `予定 ${formatMinutes(plannedMinutes)} / 使える時間 ${formatMinutes(available)}(${percent}%)`;
+
       renderHistory();
     }
 
@@ -317,8 +342,95 @@
       form.reset();
     });
 
+    // 「2026-10-04」を「10/04」の形にする道具
+    function shortDate(key) {
+      return key.slice(5).replace("-", "/");
+    }
+
+    // 予定の状態を文字にする道具
+    function statusText(task) {
+      if (task.done) {
+        return "完了";
+      }
+      if (task.dropped) {
+        return "やめた";
+      }
+      return "未完了";
+    }
+
+    // 振り返り用の文章を作る道具(直近7日分)
+    function buildReviewText() {
+      const startKey = toKey(getAppDay(-6));
+      const weekTasks = tasks
+        .filter((task) => task.date >= startKey && task.date <= todayKey)
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
+
+      let doneCount = 0;
+      let droppedCount = 0;
+      for (const task of weekTasks) {
+        if (task.done) {
+          doneCount++;
+        } else if (task.dropped) {
+          droppedCount++;
+        }
+      }
+      const notDoneCount = weekTasks.length - doneCount - droppedCount;
+      const rate = weekTasks.length === 0 ? 0 : Math.round((doneCount / weekTasks.length) * 100);
+
+      const lines = [];
+      lines.push("以下は私の直近1週間の予定の記録です。次の3点を教えてください。");
+      lines.push("1. 予定通りにできたこと・できなかったことの傾向");
+      lines.push("2. 先送りが多い予定と、その理由のパターン");
+      lines.push("3. 来週の予定の立て方の改善案(具体的に3つ)");
+      lines.push("");
+      lines.push(`期間:${shortDate(startKey)}〜${shortDate(todayKey)}`);
+      lines.push(`完了 ${doneCount}件 / 未完了 ${notDoneCount}件 / やめた ${droppedCount}件(完了率 ${rate}%)`);
+      lines.push("");
+      lines.push("【予定一覧】");
+
+      if (weekTasks.length === 0) {
+        lines.push("(この期間の予定はありません)");
+      }
+
+      for (const task of weekTasks) {
+        let line = `- ${shortDate(task.date)} ${task.name} ${task.minutes}分:${statusText(task)}`;
+        const notes = [];
+        if (task.postponed) {
+          notes.push(`先送り${task.postponed}回`);
+        }
+        if (task.reason) {
+          notes.push(`理由:${task.reason}`);
+        }
+        if (notes.length > 0) {
+          line += `(${notes.join("・")})`;
+        }
+        lines.push(line);
+      }
+
+      return lines.join("\n");
+    }
+
+    // 振り返り用にコピーする時の動き
+    const reviewButton = document.getElementById("review-button");
+    const reviewText = document.getElementById("review-text");
+    const reviewStatus = document.getElementById("review-status");
+
+    reviewButton.addEventListener("click", async () => {
+      const text = buildReviewText();
+      reviewText.value = text;
+      reviewText.hidden = false;
+
+      try {
+        await navigator.clipboard.writeText(text);
+        reviewStatus.textContent = "コピーしました。中身を確認してから、Claudeのチャットに貼り付けてください。";
+      } catch (error) {
+        reviewText.select();
+        reviewStatus.textContent = "自動でコピーできませんでした。下の文章を長押ししてコピーしてください。";
+      }
+    });
+
     // 最初に1回描く
     render();
   </script>
 </body>
-</html> 
+</html>
